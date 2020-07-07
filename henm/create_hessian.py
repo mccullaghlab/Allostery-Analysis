@@ -39,7 +39,8 @@ def main():
         average_structure = np.loadtxt(parameters['system_average_structure_file'])
         if parameters['initial_guess_hessian'] != None:
                 guess_hessian = np.loadtxt(parameters['initial_guess_hessian'])
-
+	else:
+		guess_hessian = None
         # ----------------------------------------
         # 3) Hessian Analysis
         # ----------------------------------------
