@@ -83,6 +83,8 @@ class PathSampler:
                           "as exp(-cost)); entries > 1 give negative edge costs",
                           RuntimeWarning, stacklevel=2)
         self.adjacency = A
+        # edge costs -ln(A), shared by both backends (see _reference.cost_matrix)
+        self._cost = _reference.cost_matrix(A)
         self.n_nodes = A.shape[0]
         if self.n_nodes < 3:
             raise ValueError("the graph needs at least 3 nodes")
@@ -126,7 +128,7 @@ class PathSampler:
     def shortest_path(self, source: int, sink: int) -> tuple[np.ndarray, float]:
         """Dijkstra shortest path (0-based nodes) and its weight."""
         self._check_nodes(source, sink)
-        path, dist = self._kernel.dijkstra(self.adjacency, source, sink)
+        path, dist = self._kernel.dijkstra(self._cost, source, sink)
         if dist >= 9e99 or path[0] != source + 1:
             raise ValueError(f"node {sink} cannot be reached from node {source}")
         return path - 1, dist
@@ -206,7 +208,7 @@ class PathSampler:
         def run(nsweeps):
             nonlocal npath
             npath, ndone, nnodes, status = self._kernel.sample(
-                self.adjacency, self.positions, self.angular, source, sink,
+                self._cost, self.positions, self.angular, source, sink,
                 self.temperature, nsweeps, path, npath, state,
                 nodes_buf, lengths_buf, weights_buf)
             if status != 0:  # pragma: no cover - never observed

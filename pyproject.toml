@@ -7,7 +7,7 @@ name = "allostery"
 version = "1.0.0"
 description = "Residue-level allostery from the effective coarse-grained Hessian: hENM fitting, allosteric path sampling and derivative centrality metrics."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     { name = "Peter T. Lake" },
     { name = "Russell B. Davidson" },

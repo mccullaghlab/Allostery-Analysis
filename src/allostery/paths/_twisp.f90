@@ -17,7 +17,9 @@
 !     and the routine stops early when the output buffer is full.
 !
 ! Conventions (all arrays are passed from C-ordered numpy arrays):
-!   adj(j,i)  = A[i,j]  normalized adjacency (A <= 1e-10 means no edge)
+!   cost(j,i) = C[i,j]  edge cost -ln(A[i,j]) of the normalized adjacency A,
+!                       -1 for absent edges (computed by the Python caller,
+!                       so that every backend uses bit-identical costs)
 !   xyz(k,i)  = X[i,k]  node positions (used only if angular /= 0)
 !   path      = 1-based node indices.  For broken paths the sign marks
 !               the segment: +  source segment,  -  sink segment.
@@ -54,24 +56,6 @@ contains
       r = mj*FAC
    end function ran3
 
-   !--------------------------------------------------------------------
-   ! -log(adjacency), with -1 marking absent edges.
-   !--------------------------------------------------------------------
-   subroutine adjacency_to_cost(n, adj, cost)
-      integer(c_int), intent(in) :: n
-      real(c_double), intent(in) :: adj(n, n)
-      real(c_double), intent(out) :: cost(n, n)
-      integer :: i, j
-      do i = 1, n
-         do j = 1, n
-            if (adj(j, i) < 1.d-10) then
-               cost(j, i) = -1.d0
-            else
-               cost(j, i) = -dlog(adj(j, i))
-            end if
-         end do
-      end do
-   end subroutine adjacency_to_cost
 
    !--------------------------------------------------------------------
    ! O(n^2) Dijkstra shortest path from isrc to isnk (1-based) on the
@@ -79,21 +63,20 @@ contains
    ! On return path(1:npath) holds the path and mdis its length;
    ! mdis >= 9e99 means that the sink is unreachable.
    !--------------------------------------------------------------------
-   subroutine twisp_dijkstra(n, adj, isrc, isnk, path, npath, mdis) &
+   subroutine twisp_dijkstra(n, cost, isrc, isnk, path, npath, mdis) &
       bind(C, name="allostery_twisp_dijkstra")
       integer(c_int), value, intent(in) :: n, isrc, isnk
-      real(c_double), intent(in) :: adj(n, n)
+      real(c_double), intent(in) :: cost(n, n)
       integer(c_int), intent(out) :: path(n)
       integer(c_int), intent(out) :: npath
       real(c_double), intent(out) :: mdis
 
-      real(c_double), allocatable :: cost(:, :), dist(:)
+      real(c_double), allocatable :: dist(:)
       integer(c_int), allocatable :: prev(:), q(:)
       real(c_double) :: alt
       integer :: i, mpar, j, k, m
 
-      allocate (cost(n, n), dist(n), prev(n), q(n))
-      call adjacency_to_cost(n, adj, cost)
+      allocate (dist(n), prev(n), q(n))
 
       mpar = n
       do i = 1, n
@@ -148,7 +131,7 @@ contains
          path(i) = path(j)
          path(j) = k
       end do
-      deallocate (cost, dist, prev, q)
+      deallocate (dist, prev, q)
    end subroutine twisp_dijkstra
 
    !--------------------------------------------------------------------
@@ -167,7 +150,7 @@ contains
    ! Sample paths.
    !
    ! n            number of nodes
-   ! adj(n,n)     normalized adjacency
+   ! cost(n,n)    edge costs (see the module header)
    ! xyz(3,n)     node coordinates (referenced only if angular /= 0)
    ! angular      0: path weight = sum of edge costs ("TWISP")
    !              1: add angular term -sum log|cos(theta)| ("3D")
@@ -186,7 +169,7 @@ contains
    ! nnodes       number of entries written to nodes_out
    ! status       0 ok, 1 inconsistent insertion index encountered
    !--------------------------------------------------------------------
-   subroutine twisp_sample(n, adj, xyz, angular, isrc, isnk, &
+   subroutine twisp_sample(n, cost, xyz, angular, isrc, isnk, &
                            temperature, nsweeps, path, npath, state, &
                            cap, nodes_out, lengths_out, weights_out, &
                            ndone, nnodes, status) &
@@ -194,7 +177,7 @@ contains
       integer(c_int), value, intent(in) :: n, angular
       integer(c_int), value, intent(in) :: isrc, isnk, nsweeps, cap
       real(c_double), value, intent(in) :: temperature
-      real(c_double), intent(in) :: adj(n, n)
+      real(c_double), intent(in) :: cost(n, n)
       real(c_double), intent(in) :: xyz(3, *)
       integer(c_int), intent(inout) :: path(n)
       integer(c_int), intent(inout) :: npath
@@ -204,7 +187,7 @@ contains
       real(c_double), intent(out) :: weights_out(3, nsweeps)
       integer(c_int), intent(out) :: ndone, nnodes, status
 
-      real(c_double), allocatable :: cost(:, :), rhat(:, :, :), wtry(:)
+      real(c_double), allocatable :: rhat(:, :, :), wtry(:)
       integer(c_int), allocatable :: ipath(:), ntry(:)
       real(c_double) :: T, bet, wtot, wmax, prob, try, wgt, wgt2, x2, dx
       integer(c_int) :: i, j, k, nn, i1, i2, i3, i4, j1, j2, j3, j4
@@ -218,8 +201,7 @@ contains
       bet = 1.d0/T
       is3d = (angular /= 0)
 
-      allocate (cost(n, n), ipath(n), ntry(2*n + 2), wtry(2*n + 2))
-      call adjacency_to_cost(n, adj, cost)
+      allocate (ipath(n), ntry(2*n + 2), wtry(2*n + 2))
 
       if (is3d) then
          allocate (rhat(3, n, n))
@@ -452,7 +434,7 @@ contains
          nnodes = nnodes + npath
       end do
 
-      deallocate (cost, ipath, ntry, wtry, rhat)
+      deallocate (ipath, ntry, wtry, rhat)
 
    contains
 

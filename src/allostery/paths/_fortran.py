@@ -193,19 +193,20 @@ def available() -> bool:
     return load() is not None
 
 
-def dijkstra(adjacency: np.ndarray, source: int, sink: int):
-    """Fortran Dijkstra; returns (path as 1-based array, length)."""
+def dijkstra(cost: np.ndarray, source: int, sink: int):
+    """Fortran Dijkstra on the edge costs of :func:`._reference.cost_matrix`;
+    returns (path as 1-based array, length)."""
     lib = load()
-    n = adjacency.shape[0]
+    n = cost.shape[0]
     path = np.zeros(n, dtype=np.int32)
     npath = ctypes.c_int(0)
     dist = ctypes.c_double(0.0)
-    lib.allostery_twisp_dijkstra(n, adjacency, source + 1, sink + 1, path,
+    lib.allostery_twisp_dijkstra(n, cost, source + 1, sink + 1, path,
                                  ctypes.byref(npath), ctypes.byref(dist))
     return path[: npath.value].copy(), dist.value
 
 
-def sample(adjacency, positions, angular, source, sink, temperature, nsweeps,
+def sample(cost, positions, angular, source, sink, temperature, nsweeps,
            path, npath, state, nodes_buf, lengths_buf, weights_buf):
     """Run the Fortran sampler for at most ``nsweeps`` paths.
 
@@ -213,13 +214,13 @@ def sample(adjacency, positions, angular, source, sink, temperature, nsweeps,
     ``(new_npath, ndone, nnodes, status)``.
     """
     lib = load()
-    n = adjacency.shape[0]
+    n = cost.shape[0]
     c_npath = ctypes.c_int(npath)
     ndone = ctypes.c_int(0)
     nnodes = ctypes.c_int(0)
     status = ctypes.c_int(0)
     lib.allostery_twisp_sample(
-        n, adjacency, positions, int(angular), source + 1, sink + 1,
+        n, cost, positions, int(angular), source + 1, sink + 1,
         float(temperature), int(nsweeps), path, ctypes.byref(c_npath), state,
         nodes_buf.size, nodes_buf, lengths_buf, weights_buf,
         ctypes.byref(ndone), ctypes.byref(nnodes), ctypes.byref(status),

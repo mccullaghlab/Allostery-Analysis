@@ -52,24 +52,26 @@ def _neglog_abs(x: float) -> float:
     return -math.log(x)
 
 
-def cost_matrix(adjacency: np.ndarray) -> list[list[float]]:
-    """``cost[i][j] = -log(A[j, i])`` (Fortran order), ``-1`` for no edge."""
-    n = adjacency.shape[0]
-    a = adjacency.tolist()
-    cost = [[0.0] * n for _ in range(n)]
-    for i in range(n):
-        row = a[i]
-        for j in range(n):
-            v = row[j]
-            # Fortran: adj(j,i) = A[i,j]; we store cost[j][i] = f(A[i,j])
-            cost[j][i] = -1.0 if v < 1e-10 else -math.log(v)
-    return cost
+def cost_matrix(adjacency: np.ndarray) -> np.ndarray:
+    """Edge costs ``C[i, j] = -log(A[i, j])``, ``-1`` where ``A[i, j] < 1e-10``.
+
+    Computed element by element with :func:`math.log` and handed to *both*
+    backends, so that the Fortran kernel and this implementation use
+    bit-identical costs (a compiler may otherwise replace ``log`` by a
+    vectorized version that differs in the last bit).
+    """
+    a = np.ascontiguousarray(adjacency, dtype=np.float64)
+    vals = [-1.0 if v < 1e-10 else -math.log(v) for v in a.ravel().tolist()]
+    return np.array(vals, dtype=np.float64).reshape(a.shape)
 
 
-def dijkstra(adjacency: np.ndarray, source: int, sink: int):
-    """Port of the O(n^2) Dijkstra routine; returns (1-based path, length)."""
-    n = adjacency.shape[0]
-    cost = cost_matrix(adjacency)
+def dijkstra(cost_c: np.ndarray, source: int, sink: int):
+    """Port of the O(n^2) Dijkstra routine; returns (1-based path, length).
+
+    ``cost_c`` is the matrix returned by :func:`cost_matrix`.
+    """
+    n = cost_c.shape[0]
+    cost = cost_c.T.tolist()  # cost[a-1][b-1] == Fortran cost(a, b)
     isrc, isnk = source + 1, sink + 1
     q = list(range(1, n + 1))
     dist = [9e99] * (n + 1)
@@ -118,11 +120,11 @@ def _sign(x: int) -> int:
     return 1 if x > 0 else -1
 
 
-def sample(adjacency, positions, angular, source, sink, temperature, nsweeps,
+def sample(cost_c, positions, angular, source, sink, temperature, nsweeps,
            path, npath, state, nodes_buf, lengths_buf, weights_buf):
     """Same interface and semantics as :func:`._fortran.sample`."""
-    n = adjacency.shape[0]
-    cost_t = cost_matrix(adjacency)  # cost_t[j][i] == Fortran cost(j+1, i+1)
+    n = cost_c.shape[0]
+    cost_t = cost_c.T.tolist()  # cost_t[a-1][b-1] == Fortran cost(a, b)
 
     def cost(a, b):  # Fortran cost(a, b), 1-based
         return cost_t[a - 1][b - 1]

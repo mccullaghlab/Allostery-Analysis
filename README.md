@@ -21,7 +21,7 @@ pip install .            # or: pip install -e .  for development
 pip install ".[md]"      # + MDAnalysis, to read trajectories
 ```
 
-Python ≥ 3.9 and NumPy are the only requirements. The path sampler is written in Fortran:
+Python ≥ 3.10 and NumPy are the only requirements. The path sampler is written in Fortran:
 it is compiled automatically with `gfortran` (or `$FC`) the first time it is needed and
 cached in `~/.cache/allostery`. To compile it explicitly, or to check the installation:
 
