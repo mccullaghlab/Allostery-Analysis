@@ -276,3 +276,25 @@ def test_broken_analyses(graph):
     assert probs.node_by_segment[1, 13] == pytest.approx(1.0)
     # exactly one jump between the segments per path
     assert np.triu(probs.edge_by_kind[2], 1).sum() == pytest.approx(1.0)
+
+
+@needs_fortran
+def test_merge_with_different_n_top_is_exact(graph):
+    """Regression: merging summaries with different n_top must not undercount."""
+    x, a = graph
+    e = PathSampler(a).sample(0, 13, 4000, seed=2)
+    h = len(e) // 2
+    o = e.offsets
+
+    def part(lo, hi):
+        return PathEnsemble(e.source, e.sink, e.n_nodes, e.temperature, e.angular, e.broken,
+                            e.weights[lo:hi], e.edge_weights[lo:hi], e.angular_weights[lo:hi],
+                            o[lo:hi + 1] - o[lo], e.nodes[o[lo]:o[hi]])
+
+    for n1, n2 in [(1, 3), (3, 1), (2, 5)]:
+        m = part(0, h).summary(n1).merge(part(h, len(e)).summary(n2))
+        assert m.n_top == min(n1, n2)
+        true = {p.nodes: p.count for p in e.top_paths(10)}
+        assert len(m.top_paths) == min(n1, n2)
+        for p in m.top_paths:
+            assert p.count == true[p.nodes]
