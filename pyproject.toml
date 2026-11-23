@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "allostery"
+version = "1.0.0"
+description = "Residue-level allostery from the effective coarse-grained Hessian: hENM fitting, allosteric path sampling and derivative centrality metrics."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Peter T. Lake" },
+    { name = "Russell B. Davidson" },
+    { name = "Heidi Klem" },
+    { name = "Glen M. Hocky" },
+    { name = "Martin McCullagh" },
+]
+dependencies = ["numpy>=1.21", "tomli>=1.1; python_version<'3.11'"]
+
+[project.optional-dependencies]
+md = ["MDAnalysis>=2.0"]
+test = ["pytest>=7"]
+
+[project.scripts]
+allostery = "allostery.cli:main"
+
+[project.urls]
+Paper = "https://doi.org/10.1021/acs.jctc.9b01149"
+Source = "https://github.com/mccullaghlab/Allostery-Analysis"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"allostery.paths" = ["_twisp.f90"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::UserWarning:MDAnalysis.*",
+    "ignore::DeprecationWarning:MDAnalysis.*",
+]
+markers = ["slow: long-running tests", "legacy: regression tests against the original Fortran programs (need gfortran)"]
