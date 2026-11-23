@@ -90,6 +90,41 @@ def covariance(positions: np.ndarray, aligned: bool = False, **align_kwargs):
     return cov, avg
 
 
+def distance_variance(positions: np.ndarray) -> np.ndarray:
+    """Variance of every pair distance over a trajectory.
+
+    ``<(x_ij - <x_ij>)^2>`` with ``x_ij = |r_i - r_j|`` (eq. 1.1 of Lyman et al.,
+    Biophys. J. 2008), the target of the ``"lyman"`` hENM method.  Distances
+    are invariant to rigid-body motion, so no alignment is needed.
+
+    Parameters
+    ----------
+    positions
+        ``(n_frames, N, 3)`` node coordinates.
+
+    Returns
+    -------
+    ``(N, N)`` variances in A^2 (zero diagonal).
+    """
+    x = np.asarray(positions, dtype=np.float64)
+    if x.ndim != 3 or x.shape[2] != 3:
+        raise ValueError("positions must have shape (n_frames, N, 3)")
+    n = x.shape[1]
+    # accumulate deviations from the first frame (better conditioned than
+    # raw second moments)
+    d0 = np.linalg.norm(x[0][:, None] - x[0][None], axis=-1)
+    s1 = np.zeros((n, n))
+    s2 = np.zeros((n, n))
+    for f in x:
+        dd = np.linalg.norm(f[:, None] - f[None], axis=-1) - d0
+        s1 += dd
+        s2 += dd * dd
+    m = x.shape[0]
+    var = s2 / m - (s1 / m) ** 2
+    np.fill_diagonal(var, 0.0)
+    return var.clip(min=0.0)
+
+
 def pearson_adjacency(cov3n: np.ndarray) -> np.ndarray:
     """Absolute normalized Pearson correlation of node displacements.
 

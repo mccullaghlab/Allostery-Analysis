@@ -54,6 +54,7 @@ STEPS = ("covariance", "henm", "adjacency", "paths", "derivative")
 F_COV = "covariance.dat"
 F_AVG = "average_structure.dat"
 F_LABELS = "labels.txt"
+F_DVAR = "distance_variance.dat"
 F_HESS = "hessian.dat"
 F_ADJ = "adjacency.dat"
 
@@ -70,14 +71,15 @@ DEFAULTS: dict[str, Any] = {
     "temperature": 303.0,
     "index_base": 0,
     "input": {
-        "covariance": None, "average_structure": None, "hessian": None,
+        "covariance": None, "average_structure": None, "distance_variance": None,
+        "hessian": None,
         "adjacency": None, "labels": None,
         "topology": None, "trajectory": None, "selection": "protein", "node": "com",
         "start": None, "stop": None, "step": None,
     },
     "henm": {
-        "cutoff": None, "alpha": 1e-2, "max_iterations": 1000, "threshold": 1e-4,
-        "initial_guess": 10.0, "n_zero_modes": 6,
+        "method": "projected", "cutoff": None, "alpha": None, "max_iterations": 1000,
+        "threshold": None, "initial_guess": 10.0, "n_zero_modes": 6, "max_spring": 1e4,
     },
     "adjacency": {"kind": "hessian"},
     "paths": {
@@ -132,6 +134,8 @@ class Config:
         for v in d["paths"]["variants"]:
             if v not in VARIANTS:
                 raise ValueError(f"unknown path variant {v!r}; choose from {list(VARIANTS)}")
+        if d["henm"]["method"] not in ("projected", "lyman"):
+            raise ValueError("henm.method must be 'projected' or 'lyman'")
         if d["adjacency"]["kind"] not in ("hessian", "pearson", "lmi"):
             raise ValueError("adjacency.kind must be 'hessian', 'pearson' or 'lmi'")
 
@@ -164,30 +168,38 @@ def _to0(nodes, base):
 # ----------------------------------------------------------------------------
 def step_covariance(topology, trajectory, output: Path, selection="protein", node="com",
                     start=None, stop=None, step=None):
-    """Covariance, average structure and residue labels from a trajectory."""
-    from .trajectory import trajectory_covariance
+    """Covariance, average structure, pair-distance variances and residue labels
+    from a trajectory."""
+    from .trajectory import trajectory_statistics
 
     log(f"reading trajectory ({selection!r}, node={node})")
-    cov, avg, labels = trajectory_covariance(topology, trajectory, selection, node,
-                                             start, stop, step)
+    cov, avg, dvar, labels = trajectory_statistics(topology, trajectory, selection, node,
+                                                   start, stop, step)
     output.mkdir(parents=True, exist_ok=True)
     save_matrix(output / F_COV, cov)
     save_matrix(output / F_AVG, avg, fmt="%.6f")
+    save_matrix(output / F_DVAR, dvar, header="variance of pair distances (A^2)")
     (output / F_LABELS).write_text("\n".join(labels) + "\n")
-    log(f"{len(labels)} nodes; wrote {F_COV}, {F_AVG}, {F_LABELS}")
-    return cov, avg, labels
+    log(f"{len(labels)} nodes; wrote {F_COV}, {F_AVG}, {F_DVAR}, {F_LABELS}")
+    return cov, avg, dvar, labels
 
 
 def step_henm(covariance, positions, temperature, output: Path, **options):
     """Fit the hENM Hessian and write it (plus the convergence history)."""
-    log(f"fitting hENM Hessian for {positions.shape[0]} nodes at T = {temperature} K")
+    method = options.get("method", "projected")
+    target = "distance variance" if options.get("target_variance") is not None else \
+        "projected covariance"
+    log(f"fitting hENM Hessian for {positions.shape[0]} nodes at T = {temperature} K "
+        f"(method {method}, target: {target})")
     res = fit_henm(covariance, positions, temperature=temperature, **options)
     output.mkdir(parents=True, exist_ok=True)
     save_matrix(output / F_HESS, res.hessian,
-                header="hENM Hessian (kcal/mol/A^2): -k_ij off-diagonal")
+                header=f"hENM Hessian (kcal/mol/A^2, method {method}): -k_ij off-diagonal")
     np.savetxt(output / "henm_residuals.dat",
-               np.column_stack([np.arange(1, len(res.residuals) + 1), res.residuals]),
-               fmt=["%d", "%.8e"], header="iteration residual")
+               np.column_stack([np.arange(1, len(res.residuals) + 1), res.residuals,
+                                res.relative_errors]),
+               fmt=["%d", "%.8e", "%.8e"],
+               header="iteration residual relative_rms_error_of_variances")
     status = "converged" if res.converged else "NOT converged (max_iterations reached)"
     log(f"hENM {status} after {res.n_iterations} iterations "
         f"(residual {res.residuals[-1]:.3e}); wrote {F_HESS}")
@@ -362,9 +374,9 @@ def run(config: Config | dict | str | Path, steps=None) -> dict:
         return None
 
     # --- covariance -------------------------------------------------------
-    cov = avg = labels = None
+    cov = avg = labels = dvar = None
     if inp["topology"] and "covariance" in steps:
-        cov, avg, labels = step_covariance(
+        cov, avg, dvar, labels = step_covariance(
             c.path(inp["topology"]),
             [str(c.path(t)) for t in np.atleast_1d(inp["trajectory"])] if inp["trajectory"] else None,
             out, inp["selection"], inp["node"], inp["start"], inp["stop"], inp["step"])
@@ -403,7 +415,20 @@ def run(config: Config | dict | str | Path, steps=None) -> dict:
         opts = dict(c["henm"])
         if isinstance(opts["initial_guess"], str):
             opts["initial_guess"] = load_matrix(c.path(opts["initial_guess"]))
-        results["henm"] = step_henm(need_cov(), need_avg(), c["temperature"], out, **opts)
+        cov_in = None
+        if opts["method"] == "lyman":
+            if dvar is None:
+                f = first_existing(c.path(inp["distance_variance"]), out / F_DVAR)
+                dvar = load_matrix(f) if f is not None else None
+            if dvar is None:
+                log("WARNING: henm.method = 'lyman' but no pair-distance variances are "
+                    "available (input.distance_variance or a trajectory); using the "
+                    "projected covariance as the target instead")
+                cov_in = need_cov()
+            opts["target_variance"] = dvar
+        else:
+            cov_in = need_cov()
+        results["henm"] = step_henm(cov_in, need_avg(), c["temperature"], out, **opts)
         hess = results["henm"].hessian
 
     def need_hess():

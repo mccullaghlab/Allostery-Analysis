@@ -7,7 +7,8 @@ Python package (with a small Fortran kernel) implementing the analyses of
 > J. Chem. Theory Comput. **16**, 3385–3395 (2020). [doi:10.1021/acs.jctc.9b01149](https://doi.org/10.1021/acs.jctc.9b01149)
 
 1. **Covariance** of residue nodes (e.g. centers of mass) from an all-atom MD trajectory.
-2. **hENM**: fit an effective harmonic (heterogeneous elastic network) Hessian to the covariance.
+2. **hENM**: fit an effective harmonic (heterogeneous elastic network) Hessian to the MD
+   fluctuations (two variants, see [hENM methods](#henm-methods)).
 3. **Allosteric paths**: Monte Carlo sampling of paths between source and sink residues on
    the normalized Hessian adjacency, and the analyses built on them (node/edge
    probabilities `P_node`, lowest-weight paths, path degeneracy, path thermodynamics).
@@ -68,8 +69,8 @@ Output (in `results/`):
 
 | file | content |
 |---|---|
-| `covariance.dat`, `average_structure.dat`, `labels.txt` | from the trajectory |
-| `hessian.dat`, `henm_residuals.dat` | N×N hENM Hessian (−k<sub>ij</sub> off-diagonal), convergence |
+| `covariance.dat`, `average_structure.dat`, `distance_variance.dat`, `labels.txt` | from the trajectory |
+| `hessian.dat`, `henm_residuals.dat` | N×N hENM Hessian (−k<sub>ij</sub> off-diagonal), convergence history |
 | `adjacency.dat` | normalized adjacency used for the paths |
 | `paths/<variant>/node_probability.dat` | `P_node` of every node |
 | `paths/<variant>/edge_probability.dat` | probability of every traversed edge |
@@ -115,6 +116,27 @@ der.node, der.edge                       # δ_node, δ_edge
 
 Python indices are always 0-based. See `examples/quickstart.py` for a complete,
 self-contained example on a synthetic system.
+
+## hENM methods
+
+Both methods fit spring constants such that the projected normal-mode fluctuations of the
+network, V<sub>ij</sub><sup>ENM</sup> = u<sub>ij</sub>ᵀ(C<sub>ii</sub> + C<sub>jj</sub> − C<sub>ij</sub> − C<sub>ji</sub>)u<sub>ij</sub>
+with C = k<sub>B</sub>T H⁺, match the MD fluctuations of every pair of nodes. Select one with
+`method` in `[henm]`, `--method` on the command line, or `fit_henm(..., method=...)`.
+
+| | `projected` (default, original code) | `lyman` (Lyman, Pfaendtner & Voth, *Biophys. J.* 95, 4183 (2008)) |
+|---|---|---|
+| target | MD covariance projected on the pair vectors (linearized distance variance) | variance of the pair distances over the trajectory (eq. 1.1), `distance_variance.dat` |
+| update | k ← k − α (1/V<sup>ENM</sup> − 1/V<sup>MD</sup>) | 1/(4k) ← 1/(4k) − α (V<sup>ENM</sup> − V<sup>MD</sup>) (eq. 1.2) |
+| default α | 0.01 kcal/mol | 1/(4k<sub>B</sub>T) |
+| convergence | ‖1/V<sup>ENM</sup> − 1/V<sup>MD</sup>‖ < 10⁻⁴ Å⁻² | relative RMS error < 1% |
+
+With an exact target both give the same springs. The `lyman` update can only drive
+unnecessary springs to zero asymptotically, so without a cutoff it converges more slowly; the
+distance-variance target includes the non-linear (perpendicular) contribution to distance
+fluctuations that the projected covariance neglects, so it yields somewhat softer springs for
+strongly fluctuating pairs. `henm_residuals.dat` records the relative RMS error for both methods,
+so they can be compared directly.
 
 ## Path variants
 

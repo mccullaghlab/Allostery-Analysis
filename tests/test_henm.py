@@ -90,3 +90,69 @@ def test_matches_patched_legacy(tmp_path):
     h_legacy = np.load(tmp_path / "h_legacy.npy")
     res = fit_henm(cov, x, 300.0, alpha=0.05, max_iterations=25, threshold=1e-12)
     np.testing.assert_allclose(res.hessian, h_legacy, rtol=1e-8, atol=1e-10)
+
+
+def test_distance_variance():
+    from allostery.covariance import distance_variance
+
+    rng = np.random.default_rng(3)
+    frames = rng.normal(size=(500, 6, 3)) + np.arange(6)[None, :, None] * 4
+    dv = distance_variance(frames)
+    brute = np.var(np.linalg.norm(frames[:, :, None] - frames[:, None], axis=-1), axis=0)
+    np.testing.assert_allclose(dv, brute, rtol=1e-9, atol=1e-12)
+    # invariant to rigid-body motion of each frame
+    q, _ = np.linalg.qr(rng.normal(size=(3, 3)))
+    np.testing.assert_allclose(distance_variance(frames @ q + 5.0), dv, rtol=1e-9, atol=1e-12)
+
+
+def test_lyman_recovers_springs_with_known_topology():
+    x, h = chain_system(20, seed=4)
+    k_true = spring_constants(h)
+    cov = covariance_from_hessian(h, x, 300.0)
+    guess = np.where(k_true > 0, 10.0, 0.0)
+    from allostery.hessian import laplacian_from_springs
+
+    res = fit_henm(cov, x, 300.0, method="lyman", initial_guess=laplacian_from_springs(guess),
+                   threshold=1e-7, max_iterations=3000)
+    assert res.converged and res.method == "lyman"
+    np.testing.assert_allclose(res.spring_constants, k_true, atol=1e-4)
+
+
+def test_lyman_all_pairs_reaches_one_percent():
+    """Without a known topology, absent springs only decay asymptotically,
+    but the 1% criterion of the paper is reached and true springs are fitted."""
+    x, h = chain_system(12, seed=4)
+    k_true = spring_constants(h)
+    cov = covariance_from_hessian(h, x, 300.0)
+    res = fit_henm(cov, x, 300.0, method="lyman", max_iterations=20000)
+    assert res.converged and res.relative_errors[-1] < 0.01
+    k = res.spring_constants
+    assert np.all(k >= 0)
+    assert np.median(np.abs(k - k_true)[k_true > 1] / k_true[k_true > 1]) < 0.05
+
+
+def test_lyman_with_distance_variance_target():
+    from allostery.covariance import align, distance_variance
+
+    rng = np.random.default_rng(1)
+    x, h = chain_system(12, seed=5)
+    cov = covariance_from_hessian(50 * h, x, 300.0)  # stiff: ~0.3 A fluctuations
+    frames = rng.multivariate_normal(x.ravel(), cov, size=5000, method="eigh").reshape(-1, 12, 3)
+    _, avg = align(frames)
+    dv = distance_variance(frames)
+    res = fit_henm(None, avg, 300.0, method="lyman", target_variance=dv, cutoff=12.0,
+                   max_iterations=3000, threshold=0.02)
+    assert res.converged
+    np.testing.assert_allclose(res.target_variance, dv)
+    # the backbone springs (50 * 20) are recovered to within sampling noise
+    i = np.arange(11)
+    assert np.median(np.abs(res.spring_constants[i, i + 1] / 1000.0 - 1)) < 0.2
+
+
+def test_henm_method_validation():
+    x, h = chain_system(10, seed=1)
+    cov = covariance_from_hessian(h, x, 300.0)
+    with pytest.raises(ValueError, match="method"):
+        fit_henm(cov, x, 300.0, method="voth")
+    with pytest.raises(ValueError, match="covariance or target_variance"):
+        fit_henm(None, x, 300.0, method="lyman")

@@ -55,10 +55,17 @@ def cmd_henm(a):
         guess = float(guess)
     except ValueError:
         guess = load_matrix(guess)
-    res = step_henm(load_matrix(a.covariance), load_matrix(a.structure), a.temperature,
-                    Path(a.output), cutoff=a.cutoff, alpha=a.alpha,
-                    max_iterations=a.max_iterations, threshold=a.threshold,
-                    initial_guess=guess, verbose=a.verbose)
+    if a.covariance is None and a.distance_variance is None:
+        sys.exit("henm: give --covariance and/or --distance-variance")
+    if a.method == "projected" and a.covariance is None:
+        sys.exit("henm: --method projected needs --covariance")
+    use_dvar = a.distance_variance is not None and (a.method == "lyman" or a.covariance is None)
+    res = step_henm(load_matrix(a.covariance) if a.covariance and not use_dvar else None,
+                    load_matrix(a.structure), a.temperature, Path(a.output),
+                    method=a.method,
+                    target_variance=load_matrix(a.distance_variance) if use_dvar else None,
+                    cutoff=a.cutoff, alpha=a.alpha, max_iterations=a.max_iterations,
+                    threshold=a.threshold, initial_guess=guess, verbose=a.verbose)
     return 0 if res.converged or not a.strict else 2
 
 
@@ -179,13 +186,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_covariance)
 
     s = sub.add_parser("henm", help="fit an hENM Hessian")
-    s.add_argument("--covariance", required=True, help="3N x 3N covariance (A^2)")
+    s.add_argument("--method", choices=("projected", "lyman"), default="projected",
+                   help="projected: original code (default); lyman: Lyman et al. 2008")
+    s.add_argument("--covariance", help="3N x 3N covariance (A^2)")
+    s.add_argument("--distance-variance",
+                   help="N x N pair-distance variances (A^2), the target of --method lyman")
     s.add_argument("--structure", required=True, help="N x 3 average structure (A)")
     s.add_argument("-T", "--temperature", type=float, default=303.0, help="K")
     s.add_argument("--cutoff", type=float, help="spring distance cutoff (A); default none")
-    s.add_argument("--alpha", type=float, default=1e-2)
+    s.add_argument("--alpha", type=float,
+                   help="step size (default 0.01 for projected, 1/(4kT) for lyman)")
     s.add_argument("--max-iterations", type=int, default=1000)
-    s.add_argument("--threshold", type=float, default=1e-4)
+    s.add_argument("--threshold", type=float,
+                   help="convergence threshold (default 1e-4 for projected, "
+                        "0.01 relative RMS for lyman)")
     s.add_argument("--initial-guess", default="10.0",
                    help="uniform spring constant or a Hessian file to restart from")
     s.add_argument("--strict", action="store_true", help="exit with status 2 if not converged")

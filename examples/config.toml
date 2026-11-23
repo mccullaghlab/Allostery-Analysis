@@ -14,8 +14,10 @@ index_base = 1             # node numbering used below and in all output files (
 # Either a precomputed covariance (3N x 3N, A^2) and average structure (N x 3, A) ...
 covariance = "IGPS_apo_covariance.dat"                  # example
 average_structure = "IGPS_apo_average_structure.dat"    # example
+# distance_variance = "IGPS_apo_distance_variance.dat"  # N x N, for henm.method = "lyman"
 # ... or an MD trajectory (requires MDAnalysis); then covariance.dat,
-# average_structure.dat and labels.txt are written to the output directory.
+# average_structure.dat, distance_variance.dat and labels.txt are written to
+# the output directory.
 # topology = "IGPS_apo.prmtop"                           # example
 # trajectory = ["prod1.dcd", "prod2.dcd"]                # example
 selection = "protein"      # MDAnalysis selection of the coarse-grained system
@@ -26,12 +28,20 @@ node = "com"               # residue node: "com" (center of mass), "cog" or "ca"
 # labels = "labels.txt"       # one label per node, added to the output tables
 
 [henm]
-cutoff = 12.0              # A; springs only between nodes closer than this (omit: all pairs)
-alpha = 0.01               # step size of the iterative refinement
+# "projected": algorithm of the original code (target = MD covariance projected
+#     on the pair vectors; update k <- k - alpha (1/V_ENM - 1/V_MD)).
+# "lyman": Lyman, Pfaendtner & Voth, Biophys. J. 95, 4183 (2008) (target =
+#     variance of the pair distances over the trajectory; update of the
+#     compliance 1/(4k) <- 1/(4k) - alpha (V_ENM - V_MD); stops at a relative
+#     RMS error of 1%).  Needs a trajectory or input.distance_variance.
+method = "projected"
+# cutoff = 12.0            # A; springs only between nodes closer than this (default: all pairs)
+# alpha = 0.01             # step size (default 0.01 for projected, 1/(4kT) for lyman)
 max_iterations = 1000
-threshold = 1e-4           # convergence threshold on |1/V_ENM - 1/V_MD|
+# threshold = 1e-4         # default 1e-4 A^-2 for projected, 0.01 (relative) for lyman
 initial_guess = 10.0       # uniform spring constant, or a Hessian file to restart from
 n_zero_modes = 6
+max_spring = 1e4           # upper bound on spring constants (lyman only)
 
 [adjacency]
 kind = "hessian"           # "hessian" (paper), "pearson" or "lmi"

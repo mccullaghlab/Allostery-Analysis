@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .covariance import covariance
+from .covariance import covariance, distance_variance
 
 
 def _mda():
@@ -82,3 +82,20 @@ def trajectory_covariance(topology, trajectory=None, selection: str = "protein",
     pos, labels = node_positions(topology, trajectory, selection, node, start, stop, step)
     cov, avg = covariance(pos, **align_kwargs)
     return cov, avg, labels
+
+
+def trajectory_statistics(topology, trajectory=None, selection: str = "protein",
+                          node: str = "com", start=None, stop=None, step=None, **align_kwargs):
+    """Everything the hENM fit needs, from a single pass over the trajectory.
+
+    Returns
+    -------
+    cov, avg, dist_var, labels
+        ``3N x 3N`` covariance of the aligned nodes, ``N x 3`` average
+        structure, ``N x N`` variance of every pair distance (the target of
+        the ``"lyman"`` hENM method) and residue labels.
+    """
+    pos, labels = node_positions(topology, trajectory, selection, node, start, stop, step)
+    dvar = distance_variance(pos)
+    cov, avg = covariance(pos, **align_kwargs)
+    return cov, avg, dvar, labels

@@ -95,6 +95,16 @@ def test_cli(inputs):
     assert main(["henm", "--covariance", str(d / "cov.dat"), "--structure", str(d / "avg.dat"),
                  "-T", "300", "--cutoff", "12", "--alpha", "0.25", "--threshold", "1e-6",
                  "-o", o]) == 0
+    # Lyman method with an explicit distance-variance target
+    from allostery.hessian import projected_variance, unit_vectors
+
+    np.savetxt(d / "dvar.dat", projected_variance(np.loadtxt(d / "cov.dat"), unit_vectors(x)[0]))
+    assert main(["henm", "--method", "lyman", "--distance-variance", str(d / "dvar.dat"),
+                 "--structure", str(d / "avg.dat"), "-T", "300", "--cutoff", "12",
+                 "--max-iterations", "30", "-o", str(d / "cli_lyman")]) == 0
+    assert np.loadtxt(d / "cli_lyman" / "hessian.dat").shape == (18, 18)
+    with pytest.raises(SystemExit):
+        main(["henm", "--structure", str(d / "avg.dat"), "-o", o])
     assert main(["adjacency", "--hessian", o + "/hessian.dat", "-o", o]) == 0
     assert main(["paths", "--adjacency", o + "/adjacency.dat", "--structure", str(d / "avg.dat"),
                  "--sources", "0", "--sinks", "16", "17", "--variant", "direct", "direct_3d",
@@ -146,3 +156,15 @@ def test_pipeline_from_trajectory(tmp_path):
     np.testing.assert_allclose(d_avg, 3.8, atol=0.2)  # bonds of the chain preserved
     adj = np.loadtxt(out / "adjacency.dat")
     assert adj.shape == (12, 12) and adj.max() <= 1
+
+    # pair-distance variances are written and used by the Lyman method
+    dvar = np.loadtxt(out / "distance_variance.dat")
+    assert dvar.shape == (12, 12) and np.all(dvar[~np.eye(12, dtype=bool)] > 0)
+    (tmp_path / "l.toml").write_text(
+        'output_directory = "out"\ntemperature = 300.0\n'
+        '[henm]\nmethod = "lyman"\ncutoff = 12.0\nmax_iterations = 50\n')
+    res = run(tmp_path / "l.toml", steps=["henm"])
+    assert res["henm"].method == "lyman"
+    np.testing.assert_allclose(res["henm"].target_variance, dvar, rtol=1e-8)
+    hist = np.loadtxt(out / "henm_residuals.dat")
+    assert hist.shape[1] == 3 and hist[-1, 2] < hist[0, 2]  # relative error decreases

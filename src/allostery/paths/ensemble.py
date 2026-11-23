@@ -103,7 +103,10 @@ class EnsembleSummary:
         for attr in ("source", "sink", "n_nodes", "temperature", "angular", "broken"):
             if getattr(self, attr) != getattr(other, attr):
                 raise ValueError(f"cannot merge summaries with different {attr}")
-        n_top = max(self.n_top, other.n_top)
+        # Only the min(n_top) best paths of the union have exact counts: a
+        # path missing from one summary's list may still have been sampled
+        # there (below that summary's cut-off).
+        n_top = min(self.n_top, other.n_top)
         return EnsembleSummary(
             source=self.source, sink=self.sink, n_nodes=self.n_nodes,
             temperature=self.temperature, angular=self.angular, broken=self.broken,
