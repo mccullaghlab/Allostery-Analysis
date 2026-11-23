@@ -1,0 +1,65 @@
+# Configuration for `allostery run config.toml`
+#
+# Every option is shown with its default value unless marked "example".
+# Relative paths are relative to this file.  Run only some steps with
+#     allostery run config.toml --steps henm,adjacency
+# (steps: covariance, henm, adjacency, paths, derivative).  Steps that are not
+# run read their inputs from the output directory.
+
+output_directory = "allostery_results"
+temperature = 303.0        # K, temperature of the MD simulation (hENM, derivative)
+index_base = 1             # node numbering used below and in all output files (0 or 1)
+
+[input]
+# Either a precomputed covariance (3N x 3N, A^2) and average structure (N x 3, A) ...
+covariance = "IGPS_apo_covariance.dat"                  # example
+average_structure = "IGPS_apo_average_structure.dat"    # example
+# ... or an MD trajectory (requires MDAnalysis); then covariance.dat,
+# average_structure.dat and labels.txt are written to the output directory.
+# topology = "IGPS_apo.prmtop"                           # example
+# trajectory = ["prod1.dcd", "prod2.dcd"]                # example
+selection = "protein"      # MDAnalysis selection of the coarse-grained system
+node = "com"               # residue node: "com" (center of mass), "cog" or "ca"
+# start = 0; stop = -1; step = 10                        # frame slice
+# hessian = "hessian.dat"     # skip the hENM fit and use this N x N Hessian
+# adjacency = "adjacency.dat" # skip the adjacency step and use this matrix
+# labels = "labels.txt"       # one label per node, added to the output tables
+
+[henm]
+cutoff = 12.0              # A; springs only between nodes closer than this (omit: all pairs)
+alpha = 0.01               # step size of the iterative refinement
+max_iterations = 1000
+threshold = 1e-4           # convergence threshold on |1/V_ENM - 1/V_MD|
+initial_guess = 10.0       # uniform spring constant, or a Hessian file to restart from
+n_zero_modes = 6
+
+[adjacency]
+kind = "hessian"           # "hessian" (paper), "pearson" or "lmi"
+
+[paths]
+enabled = true
+# Sources and sinks used for IGPS in the paper (1-based nodes; HisF 1-253,
+# HisH 254-454): fL50, fT104, fD130, fS225 -> hV51, hC84, hH178, hE180
+sources = [50, 104, 130, 225]   # example
+sinks = [304, 337, 431, 433]    # example
+# path variants: "direct" (paths_TWISP), "direct_3d" (paths_TWISP_3D),
+# "broken" (paths_TWISP_broken), "broken_3d" (paths_TWISP_broken_3D)
+variants = ["direct"]
+n_samples = 100000         # samples per source/sink pair (the paper used 1e6)
+temperature = 1.0          # path temperature
+seed = 2020                # pair k uses seed + k
+n_top = 1000               # number of lowest-weight unique paths reported
+bin_width = 0.01           # bin width of the path-weight histogram
+n_equilibration = 0        # discarded sweeps (the sampler starts from the shortest path)
+n_jobs = 1                 # pairs sampled in parallel threads (-1: all cores)
+backend = "auto"           # "auto", "fortran" or "python"
+save_ensembles = false     # store every sampled path (.npz; can be large)
+legacy_output = false      # also write path files in the original text format
+
+[derivative]
+enabled = true
+# sources = [...]          # default: same as [paths]
+# sinks = [...]
+# cutoff = 12.0            # drop springs longer than this before the analysis
+per_pair = false           # also store the metrics of every source/sink pair
+n_zero_modes = 6
